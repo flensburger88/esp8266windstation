@@ -20,6 +20,7 @@ char mqtt_pass[40];
 char kc_wind[4] = "0";
 char windguru_uid[30];
 char windguru_pass[20];
+char windy_key[128];
 
 String st;
 String content;
@@ -38,7 +39,7 @@ volatile int windimpulse = 0;
 #define USE_Windguru
 
 //#define USE_Windy_com
-static String WindyComApiKey = "YOUR_KEY";
+//static String WindyComApiKey = "YOUR_KEY";
 
 //#define USE_Windy_app
 static String WindyAppSecret = "YOUR_SECRET";
@@ -304,6 +305,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
       json["kc_wind"] = kc_wind;
       json["windguru_uid"] = windguru_uid;
       json["windguru_pass"] = windguru_pass;
+      json["windy_key"] = windy_key;
       json["vaneMaxADC"] = vaneMaxADC;
       json["vaneOffset"] = vaneOffset;
 	  
@@ -374,6 +376,7 @@ void setup() {
           strcpy(kc_wind, json["kc_wind"]);
           strcpy(windguru_uid, json["windguru_uid"]);
           strcpy(windguru_pass, json["windguru_pass"]);
+          strcpy(windy_key, json["windy_key"]);
           strcpy(vaneMaxADC, json["vaneMaxADC"]);
           strcpy(vaneOffset, json["vaneOffset"]);
         }
@@ -393,7 +396,8 @@ void setup() {
   WiFiManagerParameter custom_mqtt_pass("pass", "mqtt password", mqtt_pass, 40);
   WiFiManagerParameter custom_kc_wind("kc_wind", "wind correction 1-999%", kc_wind, 4);
   WiFiManagerParameter custom_windguru_uid("windguru_uid", "windguru station UID", windguru_uid, 30);
-  WiFiManagerParameter custom_windguru_pass("windguru_pass", "windguru API pass", windguru_pass, 20);
+  WiFiManagerParameter custom_windguru_pass("windguru_pass", "windguru pass", windguru_pass, 20);
+  WiFiManagerParameter custom_windy_key("windy_key", "windy api key", windy_key, 128);
   WiFiManagerParameter custom_vaneMaxADC("vaneMaxADC", "Max ADC value 1-1024", vaneMaxADC, 5);
   WiFiManagerParameter custom_vaneOffset("vaneOffset", "Wind vane offset 0-359", vaneOffset, 4);
 
@@ -432,6 +436,7 @@ void setup() {
   wifiManager.addParameter(&custom_kc_wind);
   wifiManager.addParameter(&custom_windguru_uid);
   wifiManager.addParameter(&custom_windguru_pass);
+  wifiManager.addParameter(&custom_windy_key);
   wifiManager.addParameter(&custom_vaneMaxADC);
   wifiManager.addParameter(&custom_vaneOffset);
   
@@ -456,6 +461,7 @@ void setup() {
   strcpy(kc_wind, custom_kc_wind.getValue());
   strcpy(windguru_uid, custom_windguru_uid.getValue());
   strcpy(windguru_pass, custom_windguru_pass.getValue());
+  strcpy(windy_key, custom_windy_key.getValue());
   strcpy(vaneMaxADC, custom_vaneMaxADC.getValue());
   strcpy(vaneOffset, custom_vaneOffset.getValue());
   
@@ -470,6 +476,7 @@ void setup() {
     json["kc_wind"] = kc_wind;
     json["windguru_uid"] = windguru_uid;
     json["windguru_pass"] = windguru_pass;
+    json["windy_key"] = windy_key;
 	  json["vaneMaxADC"] = vaneMaxADC;
 	  json["vaneOffset"] = vaneOffset;
     
@@ -779,7 +786,7 @@ bool SendToWindyCom() { // send info to http://stations.windy.com/stations
   unsigned long time;
   
   if (WiFi.status() == WL_CONNECTED) { //Check WiFi connection status
-     Link = "http://stations.windy.com/pws/update/" + WindyComApiKey + "?name=AzovKite&";
+     Link = "http://stations.windy.com/pws/update/" + String(windy_key) + "?name=windsurf&";
     
      //wind speed during interval (knots)
      if (meterWind > 0)
