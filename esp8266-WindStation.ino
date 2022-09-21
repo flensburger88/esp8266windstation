@@ -30,7 +30,7 @@ unsigned long last_micros = 0;
 volatile int windimpulse = 0;
 
 #define VERSION         "v1.87 OTA"
-#define VERSIONINFO     "\n\n----------------- GAYIK Wind Station v1.87 OTA -----------------"
+#define VERSIONINFO     "\n\n----------------- GAYIK Wind Station v1.90 OTA -----------------"
 #define NameAP      "WindStationAP"
 #define PasswordAP  "87654321"
 #define FirmwareURL "http://gayikweatherstation.blob.core.windows.net/firmware/esp8266-WindStation.ino.generic.bin"   //URL of firmware file for http OTA update by secret MQTT command "flash" 
