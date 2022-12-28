@@ -30,8 +30,8 @@ int debouncing_time = 10000;                                  // time in microse
 unsigned long last_micros = 0;
 volatile int windimpulse = 0;
 
-#define VERSION         "v1.87 OTA"
-#define VERSIONINFO     "\n\n----------------- GAYIK Wind Station v1.90 OTA -----------------"
+#define VERSION         "v1.92 OTA"
+#define VERSIONINFO     "\n\n----------------- GAYIK Wind Station v1.92 OTA -----------------"
 #define NameAP      "WindStationAP"
 #define PasswordAP  "87654321"
 #define FirmwareURL "http://gayikweatherstation.blob.core.windows.net/firmware/esp8266-WindStation.ino.generic.bin"   //URL of firmware file for http OTA update by secret MQTT command "flash" 
@@ -102,14 +102,11 @@ float windSpeed = 0;     // Wind speed (mph)
 
 volatile unsigned long Rotations;     // cup rotation counter used in interrupt routine
 volatile unsigned long ContactBounceTime;  // Timer to avoid contact bounce in interrupt routine
-float wind_dir_avg; // average wind direction
 int vane_value;// raw analog value from wind vane
 int Direction;// translated 0 - 360 direction
 int CalDirection;// converted value with offset applied
-char vaneOffset[4] = "-45";  
+char vaneOffset[4] = "0";  
 char vaneMaxADC[5] = "1023";                                // ADC range for input voltage 0..1V
-
-
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
@@ -165,57 +162,16 @@ void IRAM_ATTR isr_rotation()
 //-------------------------------------------------------------------------------------------------------------
 void getWindDirection(void) 
 {
-vane_value = analogRead(A0);
-Direction = map(vane_value, 0, 1023, 0, 360);
-CalDirection = Direction + atoi(vaneOffset);
-
-if(CalDirection > 360)
-CalDirection = CalDirection - 360;
-
-if(CalDirection < 0)
-CalDirection = CalDirection + 360;
-
- DirectionCheck();
-}
-void DirectionCheck()
-{
-  if(vane_value >= 0 && vane_value < 32)
-   wind_dir_avg = 0;
-  else if(vane_value >= 32 && vane_value < 96)
-  wind_dir_avg = 22.5;
-  else if(vane_value >= 96 && vane_value < 160)
-  wind_dir_avg = 45;
-  else if(vane_value >= 160 && vane_value < 224)
-  wind_dir_avg = 67.5;
-  else if(vane_value >= 224 && vane_value < 288)
-  wind_dir_avg = 90;
-  else if(vane_value >= 288 && vane_value < 352)
-  wind_dir_avg = 112.5;
-  else if(vane_value >= 352 && vane_value < 416)
-  wind_dir_avg = 135;
-  else if(vane_value >= 416 && vane_value < 480)
-  wind_dir_avg = 157.5;
-  else if(vane_value >= 480 && vane_value < 544)
-  wind_dir_avg = 180;
-  else if(vane_value >= 544 && vane_value < 608)
-  wind_dir_avg = 202.5;
-  else if(vane_value >= 608 && vane_value < 672)
-  wind_dir_avg = 225;
-  else if(vane_value >= 672 && vane_value < 736)
-  wind_dir_avg = 247.5;
-  else if(vane_value >= 736 && vane_value < 800)
-  wind_dir_avg = 270;
-  else if(vane_value >= 800 && vane_value < 864)
-  wind_dir_avg = 292.5;
-  else if(vane_value >= 864 && vane_value < 928)
-  wind_dir_avg = 315;
-  else if(vane_value >= 928 && vane_value < 992)
-  wind_dir_avg = 337.5;
-  else if(vane_value >= 992 && vane_value < 1025)
-  wind_dir_avg = 0;
+  vane_value = analogRead(A0); // read sensor data
+  Direction = map(vane_value, 0, atoi(vaneMaxADC), 0, 359); // map it to 360 degrees
+  CalDirection = Direction + atoi(vaneOffset); // factor in the offset degrees
   
-  //DirectionAvg();
-
+  // Fix degrees:
+  if(CalDirection > 360)
+  CalDirection = CalDirection - 360;
+  
+  if(CalDirection < 0)
+  CalDirection = CalDirection + 360;
 }
 
 // Convert MPH to Knots
@@ -250,36 +206,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
      mqttClient.publish("debug",("ADC:" + String(analogRead(A0)) + " error:" + String(errors_count)).c_str());   
   }
   else if (payload_string == "flash") {
-     Serial.println("HTTP_UPDATE FILE: " + String(FirmwareURL));
-     //noInterrupts();
-     detachInterrupt(digitalPinToInterrupt(WINDPIN));
-     WiFiClient client;
-     /*
-     if (!client.connect(FirmwareURL, 80)) {
-      Serial.println("connection failed");
-      }
-
-      if (client.verify(FirmwareURLFingerprint, FirmwareURL)) {
-        Serial.println("certificate matches");
-      } else {
-        Serial.println("certificate doesn't match");
-      }
-    */
-     ESPhttpUpdate.setLedPin(LED, LOW);
-     t_httpUpdate_return ret = ESPhttpUpdate.update(client, FirmwareURL);
-     attachInterrupt(WINDPIN, isr_rotation, FALLING);
-    
-    switch (ret) {
-      case HTTP_UPDATE_FAILED:
-        Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
-        break;
-      case HTTP_UPDATE_NO_UPDATES:
-        Serial.println("HTTP_UPDATE_NO_UPDATES");
-        break;
-      case HTTP_UPDATE_OK:
-        Serial.println("HTTP_UPDATE_OK");
-        break;
-     }
+    flashOTA();
   }
   else { 
     // We check the topic in order to see what kind of payload we got:
@@ -337,18 +264,31 @@ void SaveParamsCallback () {
   shouldSaveConfig = true;
 }
 
-void setup() {
-  Serial.begin(115200);
-  Serial.println(VERSIONINFO);
-  Serial.print("\nESP ChipID: ");
-  Serial.println(ESP.getChipId(), HEX);
+void flashOTA() {
+   Serial.println("HTTP_UPDATE FILE: " + String(FirmwareURL));
+     //noInterrupts();
+     detachInterrupt(digitalPinToInterrupt(WINDPIN));
+     WiFiClient client;
 
-  //clean FS, erase config.json in case of damaged file
-  //SPIFFS.format();
+     ESPhttpUpdate.setLedPin(LED, LOW);
+     t_httpUpdate_return ret = ESPhttpUpdate.update(client, FirmwareURL);
+     attachInterrupt(WINDPIN, isr_rotation, FALLING);
+    
+    switch (ret) {
+      case HTTP_UPDATE_FAILED:
+        Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+        ESP.reset();
+        break;
+      case HTTP_UPDATE_NO_UPDATES:
+        Serial.println("HTTP_UPDATE_NO_UPDATES");
+        break;
+      case HTTP_UPDATE_OK:
+        Serial.println("HTTP_UPDATE_OK");
+        break;
+     }
+}
 
-  
-  Rotations = 0;   // Set Rotations to 0 ready for calculations
-  
+void setupSpiffs() {
   //read configuration from FS json
   Serial.println("mounting FS...");
 
@@ -386,6 +326,21 @@ void setup() {
     Serial.println("failed to mount FS");
   }
   //end read configuration
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println(VERSIONINFO);
+  Serial.print("\nESP ChipID: ");
+  Serial.println(ESP.getChipId(), HEX);
+
+  //clean FS, erase config.json in case of damaged file
+  //SPIFFS.format();
+
+  
+  Rotations = 0;   // Set Rotations to 0 ready for calculations
+  
+  setupSpiffs();
 
   // The extra parameters to be configured (can be either global or just in the setup)
   // After connecting, parameter.getValue() will get you the configured value
@@ -439,7 +394,7 @@ void setup() {
   wifiManager.addParameter(&custom_windy_key);
   wifiManager.addParameter(&custom_vaneMaxADC);
   wifiManager.addParameter(&custom_vaneOffset);
-  
+
   if(!wifiManager.autoConnect(NameAP, PasswordAP)) {
     Serial.println("failed to connect and hit timeout");
     delay(1000);
@@ -542,7 +497,14 @@ void setup() {
   attachInterrupt(WINDPIN, isr_rotation, FALLING);
 }
 
+int updateOTACheckTimer = 20;
 void loop() { 
+     updateOTACheckTimer++;
+     if(updateOTACheckTimer > 30){
+         updateOTACheckTimer = 0;
+         flashOTA();
+     }
+  
   mqttClient.loop();
   timedTasks();
   checkStatus();
