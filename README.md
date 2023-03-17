@@ -5,11 +5,29 @@ This project is based on the original esp8266-WindStation project located at:
 https://github.com/zpukr/esp8266-WindStation
 and for ESP32: https://github.com/zpukr/esp32-WindStation <br>
 
-Changes to the original code:
+Changes to the original code (by emreetugrul):
 - code cleanup, refactoring & commenting, simpler flow
 - improved functionality for reading wind speed and direction (for Davis 6410)
 - improved OTA
 - improved configuration management over MQTT
+
+
+Additional Changes (by Flensburger88)
+- migrated to PIO / Removed Offline Code Copies
+- Cleaned up the code
+- (temporarily) disabled the ota update mechanism
+- optimized the error handling messages
+- its not an error, if no mqtt is configured
+- its not an error, if no windguru uid is configured
+
+Todos:
+- enable configuration possibility after wifi is connected ( lazy portal )
+- enable windy  / disable in runtime, if no user is configured
+- add custom weather server url
+- add dynamic update url / configurable via setup routine
+- ntp client as project dependency (pio)
+- time as project dependency (pio)
+- docu for mqtt commands
 
 
 An example of building a weather station on the ESP8266 Wemos D1 mini board (cost ~$4), Davis Anemometer ( ~$120) and DHT11 ( ~$1):

@@ -118,8 +118,7 @@ char msg_buff[MSG_BUFFER_SIZE];
 Ticker btn_timer;
 
 // config for rest service
-#define HTTP_REST_PORT 80
-ESP8266WebServer httpRestServer(HTTP_REST_PORT);
+WiFiManager wifiManager;
 
 //--------------------------------START OF CODE SECTION--------------------------------------------------------
 
@@ -410,17 +409,6 @@ void connectMQTT()
   }
 }
 
-void openRestServer()
-{
-  httpRestServer.stop();
-
-  /*httpRestServer.on("/", HTTP_GET, []()
-                    { httpRestServer.send(200, F("text/html"),
-                                          F("Welcome to the REST Web Server")); });*/
-
-  httpRestServer.begin();
-}
-
 void setup()
 {
   Serial.begin(9600);
@@ -464,7 +452,6 @@ void setup()
 
   mqttClient.setCallback(callback);
 
-  WiFiManager wifiManager;
   wifiManager.setSaveConfigCallback(saveConfigCallback); // set config save notify callback
 
   // std::vector<const char *> menu = {"wifi","info","param","update","close","sep","erase","restart","exit"};
@@ -540,7 +527,8 @@ void setup()
     serializeJson(json, configFile);
     configFile.close();
 
-    openRestServer();
+    // TODO: Start Webserver to modify parameters in runtime
+    // openRestServer();
 
     // end save parameters
   }
@@ -625,24 +613,25 @@ void button()
   }
 }
 
-void checkConnection()
+void checkMQTTConnection()
 {
-  if (WiFi.status() == WL_CONNECTED)
+  if (WiFi.status() != WL_CONNECTED)
   {
-    if (mqttClient.connected())
-    {
-      Serial.println("mqtt broker connection . . . . . . . . . . OK");
-    }
-    else
-    {
-      errors_count = errors_count + 5;
-      Serial.println("mqtt broker connection . . . . . . . . . . LOST errors_count = " + String(errors_count));
-    }
+    errors_count = errors_count + 10;
+    Serial.println("WiFi connection . . . LOST errors_count = " + String(errors_count));
+  }
+  else if (String(mqtt_server).length() == 0)
+  {
+    Serial.println("mqtt broker connection . . . ..not configured");
+  }
+  else if (mqttClient.connected())
+  {
+    Serial.println("mqtt broker connection . . . . . . . . . . OK");
   }
   else
   {
-    errors_count = errors_count + 10;
-    Serial.println("WiFi connection . . . . . . . . . . LOST errors_count = " + String(errors_count));
+    errors_count = errors_count + 5;
+    Serial.println("mqtt broker connection. . . . LOST errors_count = " + String(errors_count));
   }
 }
 
@@ -777,7 +766,7 @@ void timedTasks()
     if ((WindMax > 2) && (WindMin == WindMax))
       errors_count = errors_count + 25; // check for freeze CPU
     TTasks = millis();
-    checkConnection();
+    checkMQTTConnection();
     // sensorReport = true;
     getSensors();
     SendData();
@@ -826,7 +815,7 @@ bool SendToWindguru()
   }
   else if (String(windguru_uid).length() == 0)
   {
-    Serial.println("windguru uid not configured");
+    Serial.println("\nwindguru uid not configured");
     return true; // not an failure / just not configured;
   }
   else
