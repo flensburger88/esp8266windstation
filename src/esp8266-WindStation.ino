@@ -117,6 +117,10 @@ char msg_buff[MSG_BUFFER_SIZE];
 
 Ticker btn_timer;
 
+// config for rest service
+#define HTTP_REST_PORT 80
+ESP8266WebServer httpRestServer(HTTP_REST_PORT);
+
 //--------------------------------START OF CODE SECTION--------------------------------------------------------
 
 //-------------------------------------------------------------------------------------------------------------
@@ -361,6 +365,61 @@ void setupSpiffs()
   }
   // end read configuration
 }
+void connectMQTT()
+{
+
+  if (String(mqtt_server).length() == 0)
+  {
+    Serial.println("Mqtt Broker not configured");
+  }
+  else
+  {
+    Serial.print("Connecting to ");
+    Serial.print(mqtt_server);
+    Serial.print(" Broker . .");
+    delay(500);
+    mqttClient.setServer(mqtt_server, atoi(mqtt_port));
+    mqttClient.setSocketTimeout(70);
+    mqttClient.setKeepAlive(70);
+    while (!mqttClient.connected() && kRetries--)
+    {
+      String str = String(ESP.getChipId(), HEX);
+      mqttClient.connect(str.c_str(), mqtt_user, mqtt_pass);
+      Serial.print(" .");
+      delay(1000);
+    }
+    if (mqttClient.connected())
+    {
+      Serial.println(" DONE");
+      Serial.println("\n----------------------------  Logs  ----------------------------");
+      Serial.println();
+      mqttClient.subscribe(MQTT_TOPIC);
+      mqttClient.subscribe(MQTT_TOPICm);
+      mqttClient.subscribe(MQTT_TOPICo);
+      blinkLED(LED, 40, 8);
+      digitalWrite(LED, LOW);
+      mqttClient.publish("start", ("Version:" + String(VERSION)).c_str());
+    }
+    else
+    {
+      Serial.println(" FAILED!");
+      Serial.println("\n----------------------------------------------------------------");
+      Serial.println();
+      digitalWrite(LED, HIGH);
+    }
+  }
+}
+
+void openRestServer()
+{
+  httpRestServer.stop();
+
+  /*httpRestServer.on("/", HTTP_GET, []()
+                    { httpRestServer.send(200, F("text/html"),
+                                          F("Welcome to the REST Web Server")); });*/
+
+  httpRestServer.begin();
+}
 
 void setup()
 {
@@ -429,7 +488,7 @@ void setup()
   wifiManager.addParameter(&custom_vaneMaxADC);
   wifiManager.addParameter(&custom_vaneOffset);
 
-  if (!wifiManager.autoConnect(NameAP, PasswordAP))
+  if (!wifiManager.autoConnect(NameAP))
   {
     Serial.println("failed to connect and hit timeout");
     delay(1000);
@@ -480,6 +539,9 @@ void setup()
     serializeJson(json, Serial);
     serializeJson(json, configFile);
     configFile.close();
+
+    openRestServer();
+
     // end save parameters
   }
 
@@ -500,39 +562,7 @@ void setup()
     Serial.println(WiFi.localIP());
     Serial.print("macAddress is: ");
     Serial.println(WiFi.macAddress());
-    Serial.print("Connecting to ");
-    Serial.print(mqtt_server);
-    Serial.print(" Broker . .");
-    delay(500);
-    mqttClient.setServer(mqtt_server, atoi(mqtt_port));
-    mqttClient.setSocketTimeout(70);
-    mqttClient.setKeepAlive(70);
-    while (!mqttClient.connected() && kRetries--)
-    {
-      String str = String(ESP.getChipId(), HEX);
-      mqttClient.connect(str.c_str(), mqtt_user, mqtt_pass);
-      Serial.print(" .");
-      delay(1000);
-    }
-    if (mqttClient.connected())
-    {
-      Serial.println(" DONE");
-      Serial.println("\n----------------------------  Logs  ----------------------------");
-      Serial.println();
-      mqttClient.subscribe(MQTT_TOPIC);
-      mqttClient.subscribe(MQTT_TOPICm);
-      mqttClient.subscribe(MQTT_TOPICo);
-      blinkLED(LED, 40, 8);
-      digitalWrite(LED, LOW);
-      mqttClient.publish("start", ("Version:" + String(VERSION)).c_str());
-    }
-    else
-    {
-      Serial.println(" FAILED!");
-      Serial.println("\n----------------------------------------------------------------");
-      Serial.println();
-      digitalWrite(LED, HIGH);
-    }
+    connectMQTT();
   }
   else
   {
@@ -789,7 +819,17 @@ bool SendToWindguru()
   String getData = "", Link;
   unsigned long time;
 
-  if (WiFi.status() == WL_CONNECTED)
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("wi-fi connection failed");
+    return false; // fail;
+  }
+  else if (String(windguru_uid).length() == 0)
+  {
+    Serial.println("windguru uid not configured");
+    return true; // not an failure / just not configured;
+  }
+  else
   { // Check WiFi connection status
     Link = "http://www.windguru.cz/upload/api.php?";
     time = millis();
@@ -820,11 +860,6 @@ bool SendToWindguru()
         mqttClient.publish("debug", payload.c_str());
     }
     http.end(); // Close connection
-  }
-  else
-  {
-    Serial.println("wi-fi connection failed");
-    return false; // fail;
   }
 
   return true; // done
