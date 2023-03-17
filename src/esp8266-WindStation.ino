@@ -34,7 +34,8 @@ volatile int windimpulse = 0;
 #define VERSIONINFO "\n\n----------------- GAYIK Wind Station v1.92 OTA -----------------"
 #define NameAP "WindStationAP"
 #define PasswordAP "87654321"
-#define FirmwareURL "http://gayikweatherstation.blob.core.windows.net/firmware/esp8266-WindStation.ino.generic.bin" // URL of firmware file for http OTA update by secret MQTT command "flash"
+// #define FirmwareURL "http://gayikweatherstation.blob.core.windows.net/firmware/esp8266-WindStation.ino.generic.bin" // URL of firmware file for http OTA update by secret MQTT command "flash"
+#define FirmwareURL ""
 
 #define USE_Windguru
 
@@ -280,6 +281,13 @@ void SaveParamsCallback()
 
 void flashOTA()
 {
+  // disabling the ota update
+  if (String(FirmwareURL).length() == 0)
+  {
+    Serial.println("OTA Update disabled");
+    return;
+  }
+
   Serial.println("HTTP_UPDATE FILE: " + String(FirmwareURL));
   // noInterrupts();
   detachInterrupt(digitalPinToInterrupt(WINDPIN));
@@ -332,16 +340,16 @@ void setupSpiffs()
         {
           serializeJson(json, Serial);
           Serial.println("\nparsed json");
-          strcpy(mqtt_server, json["mqtt_server"]|"");
-          strcpy(mqtt_port, json["mqtt_port"]|"");
-          strcpy(mqtt_user, json["mqtt_user"]|"");
-          strcpy(mqtt_pass, json["mqtt_pass"]|"");
-          strcpy(kc_wind, json["kc_wind"]|"");
-          strcpy(windguru_uid, json["windguru_uid"]|"");
-          strcpy(windguru_pass, json["windguru_pass"]|"");
-          strcpy(windy_key, json["windy_key"]|"");
-          strcpy(vaneMaxADC, json["vaneMaxADC"]|"");
-          strcpy(vaneOffset, json["vaneOffset"]|"");
+          strcpy(mqtt_server, json["mqtt_server"] | "");
+          strcpy(mqtt_port, json["mqtt_port"] | "");
+          strcpy(mqtt_user, json["mqtt_user"] | "");
+          strcpy(mqtt_pass, json["mqtt_pass"] | "");
+          strcpy(kc_wind, json["kc_wind"] | "");
+          strcpy(windguru_uid, json["windguru_uid"] | "");
+          strcpy(windguru_pass, json["windguru_pass"] | "");
+          strcpy(windy_key, json["windy_key"] | "");
+          strcpy(vaneMaxADC, json["vaneMaxADC"] | "");
+          strcpy(vaneOffset, json["vaneOffset"] | "");
           Serial.println("\nAfter Reading");
         }
       }
