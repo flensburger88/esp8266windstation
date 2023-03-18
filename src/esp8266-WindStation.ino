@@ -23,6 +23,8 @@
 #define LEN_WINDYKEY 128
 #define LEN_VANEOFFSET 4
 #define LEN_VANEMAXADC 5
+#define LEN_WINDYAPP_SECRET 15 //?
+#define LEN_WINDYAPP_ID 5      //?
 
 char mqtt_server[LEN_MQTTSERVER];
 char mqtt_port[LEN_MQTTPORT] = "1883";
@@ -33,7 +35,9 @@ char windguru_uid[LEN_WINDUGUUID];
 char windguru_pass[LEN_WINDGUTUPASS];
 char windy_key[LEN_WINDYKEY];
 char vaneOffset[LEN_VANEOFFSET] = "0";
-char vaneMaxADC[LEN_VANEMAXADC] = "1023"; // ADC range for input voltage 0..1V
+char vaneMaxADC[LEN_WINDYAPP_ID] = "1023"; // ADC range for input voltage 0..1V
+char windyAppSecret[LEN_WINDYAPP_SECRET] = "";
+char windyAppID[LEN_WINDYAPP_ID] = "";
 
 WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, LEN_MQTTSERVER);
 WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, LEN_MQTTPORT);
@@ -45,6 +49,8 @@ WiFiManagerParameter custom_windguru_pass("windguru_pass", "windguru pass", wind
 WiFiManagerParameter custom_windy_key("windy_key", "windy api key", windy_key, LEN_WINDYKEY);
 WiFiManagerParameter custom_vaneMaxADC("vaneMaxADC", "Max ADC value 1-1024", vaneMaxADC, LEN_VANEMAXADC);
 WiFiManagerParameter custom_vaneOffset("vaneOffset", "Wind vane offset 0-359", vaneOffset, LEN_VANEOFFSET);
+WiFiManagerParameter custom_windyAppId("windyAppID", "WindyApp user Id", windyAppID, LEN_WINDYAPP_ID);
+WiFiManagerParameter custom_windyAppSecret("windyAppSecret", "Windy App secret", windyAppSecret, LEN_WINDYAPP_SECRET);
 
 String st;
 String content;
@@ -57,24 +63,14 @@ volatile int windimpulse = 0;
 #define VERSION "v1.92 OTA"
 #define VERSIONINFO "\n\n----------------- GAYIK Wind Station v1.92 OTA -----------------"
 #define NameAP "WindStationAP"
-#define PasswordAP "87654321"
+
 // #define FirmwareURL "http://gayikweatherstation.blob.core.windows.net/firmware/esp8266-WindStation.ino.generic.bin" // URL of firmware file for http OTA update by secret MQTT command "flash"
 #define FirmwareURL ""
 #define MQTT_CONNECT_RETRIES 5
 
-#define USE_Windguru
-
-// #define USE_Windy_com
-// static String WindyComApiKey = "YOUR_KEY";
-
-// #define USE_Windy_app
-static String WindyAppSecret = "YOUR_SECRET";
-static String WindyAppID = "YOUR_ID";
-
-// #define DeepSleepMODE                                        // !!! To enable Deep-sleep, you need to connect GPIO16 (D0 for NodeMcu) to the EXT_RSTB/REST (RST for NodeMcu) pin
 // #define NightSleepMODE                                       // Enable deep-sleep only in night time
 #if defined(DeepSleepMODE) || defined(NightSleepMODE) // Deep-sleep mode power consumption ~6mAh (3*5=15sec work/5 min sleep), instead ~80mAh in default "Always On" mode
-#define SLEEPDAY 5                                    // deep sleep time in minutes, minimum 5min for use narodmon.com and reasonable power saving
+
 #define SLEEPNIGHT 10
 #define TIMEZONE 2        // UTC offset
 #define TIMEMORNING 5     // night end at...
@@ -305,6 +301,8 @@ void saveConfigCallback()
   strcpy(windy_key, custom_windy_key.getValue());
   strcpy(vaneMaxADC, custom_vaneMaxADC.getValue());
   strcpy(vaneOffset, custom_vaneOffset.getValue());
+  strcpy(windyAppID, custom_windyAppId.getValue());
+  strcpy(windyAppSecret, custom_windyAppSecret.getValue());
 
   // save the custom parameters to FS
 
@@ -320,6 +318,8 @@ void saveConfigCallback()
   json["windy_key"] = windy_key;
   json["vaneMaxADC"] = vaneMaxADC;
   json["vaneOffset"] = vaneOffset;
+  json["windyAppID"] = windyAppID;
+  json["windyAppSecret"] = windyAppSecret;
 
   File configFile = SPIFFS.open("/config.json", "w");
   if (!configFile)
@@ -405,6 +405,8 @@ void setupSpiffs()
           strcpy(windy_key, json["windy_key"] | windy_key);
           strcpy(vaneMaxADC, json["vaneMaxADC"] | vaneMaxADC);
           strcpy(vaneOffset, json["vaneOffset"] | vaneOffset);
+          strcpy(windyAppID, json["windyAppID"] | windyAppID);
+          strcpy(windyAppSecret, json["windyAppSecret"] | windyAppSecret);
           Serial.println("\nAfter Reading");
 
           custom_mqtt_server.setValue(mqtt_server, LEN_MQTTSERVER);
@@ -417,6 +419,8 @@ void setupSpiffs()
           custom_windy_key.setValue(windy_key, LEN_WINDYKEY);
           custom_vaneMaxADC.setValue(vaneMaxADC, LEN_VANEMAXADC);
           custom_vaneOffset.setValue(vaneOffset, LEN_VANEOFFSET);
+          custom_windyAppId.setValue(windyAppID, LEN_WINDYAPP_ID);
+          custom_windyAppSecret.setValue(windyAppSecret, LEN_WINDYAPP_SECRET);
         }
       }
     }
@@ -525,6 +529,8 @@ void setup()
   wifiManager.addParameter(&custom_windy_key);
   wifiManager.addParameter(&custom_vaneMaxADC);
   wifiManager.addParameter(&custom_vaneOffset);
+  wifiManager.addParameter(&custom_windyAppId);
+  wifiManager.addParameter(&custom_windyAppSecret);
 
   WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
@@ -715,61 +721,6 @@ void timedTasks()
   getWindSpeed();
   getWindDirection();
 
-#ifdef DeepSleepMODE
-  if (meterWind == 3)
-  { // after 3 measurements send data and go to sleep
-    getSensors();
-    SendData();
-    //-------------------------------------------
-    time_t time_sync = NTP.getLastNTPSync();
-    // int hours = (time_sync / 3600) % 24;
-    int hours = hour();
-    Serial.print(NTP.getTimeDateString());
-    Serial.print(". ");
-    Serial.print(NTP.isSummerTime() ? "Summer Time. " : "Winter Time. ");
-    //-------------------------------------------
-    if ((time_sync != 0) && ((hours < TIMEMORNING) || (hours >= TIMEEVENING)))
-    {
-      Serial.println("Good night sleep");
-      ESP.deepSleep(SLEEPNIGHT * 60000000); // Sleep for night SLEEPTIME*1 minute(s)
-    }
-    else
-    {
-      Serial.println("Good day sleep");
-      ESP.deepSleep(SLEEPDAY * 60000000); // Sleep for day SLEEPTIME*1 minute(s)
-    }
-    delay(500);
-  }
-#endif
-
-#ifdef NightSleepMODE
-  if (meterWind == 3)
-  { // after 3 measurements send data and go to sleep, but only in night time!
-    time_t time_sync = NTP.getLastNTPSync();
-    if (time_sync != 0)
-    {
-      // int hours = (time_sync / 3600) % 24;
-      int hours = hour();
-      Serial.print("Hours: " + String(hours));
-      if ((hours < TIMEMORNING) || (hours >= TIMEEVENING))
-      {
-        getSensors();
-        SendData();
-        Serial.println(" Good night sleep");
-        ESP.deepSleep(SLEEPNIGHT * 60000000); // Sleep for night SLEEPTIME*1 minute(s);
-        delay(500);
-      }
-    }
-    else
-    {
-      if (millis() > 120000)
-      {
-        NTP.getTime(); // if after 2 min of working not any time sync try force update
-      }
-    }
-  }
-#endif
-
   // kUpdFreq minutes timer
   if ((millis() > TTasks + (kUpdFreq * 60000)) || (millis() < TTasks))
   {
@@ -786,18 +737,14 @@ void timedTasks()
 void SendData()
 {
 
-#ifdef USE_Windguru
   if (!SendToWindguru())
     errors_count++;
-#endif
-#ifdef USE_Windy_com
+
   if (!SendToWindyCom())
     errors_count++;
-#endif
-#ifdef USE_Windy_app
+
   if (!SendToWindyApp())
     errors_count++;
-#endif
 
   ResetCounters();
 }
@@ -875,9 +822,17 @@ bool SendToWindyCom()
   WiFiClient client;
   HTTPClient http; // must be declared after WiFiClient for correct destruction order, because used by http.begin(client,...)
   String getData, Link;
-  unsigned long time;
 
-  if (WiFi.status() == WL_CONNECTED)
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("wi-fi disconnected - not windy uploading");
+    return false; // fail;
+  }
+  else if (String(windy_key).isEmpty())
+  {
+    Serial.println("windy not configured - skipping");
+  }
+  else
   { // Check WiFi connection status
     Link = "http://stations.windy.com/pws/update/" + String(windy_key) + "?name=windsurf&";
 
@@ -903,11 +858,6 @@ bool SendToWindyCom()
     }
     http.end(); // Close connection
   }
-  else
-  {
-    Serial.println("wi-fi connection failed");
-    return false; // fail;
-  }
 
   return true; // done
 }
@@ -927,9 +877,18 @@ bool SendToWindyApp()
   const char *host = "windyapp.co"; // only google.com not https://google.com
   String getData = "", Link;
 
-  if (WiFi.status() == WL_CONNECTED)
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("wi-fi connection failed");
+    return false; // fail;
+  }
+  else if (String(windyAppID).isEmpty())
+  {
+    Serial.println("WindyApp not configured - skipping upload");
+  }
+  else
   { // Check WiFi connection status
-    Link = "/apiV9.php?method=addCustomMeteostation&secret=" + WindyAppSecret + "&i=" + WindyAppID + "&";
+    Link = "/apiV9.php?method=addCustomMeteostation&secret=" + String(windyAppSecret) + "&i=" + String(windyAppID) + "&";
     if (meterWind > 0)
       getData = "d5=" + String(map(CalDirection, 0, 359, 1, 1024)) + "&m=" + String(WindMin * 10, 0) + "&a=" + String(WindAvr / meterWind * 10, 0) + "&g=" + String(WindMax * 10, 0);
 
@@ -984,11 +943,6 @@ bool SendToWindyApp()
       payload = getData + "> " + payload;
       mqttClient.publish("debug", payload.c_str());
     }
-  }
-  else
-  {
-    Serial.println("wi-fi connection failed");
-    return false; // fail;
   }
 
   return true; // done

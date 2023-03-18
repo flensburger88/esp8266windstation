@@ -19,15 +19,20 @@ Additional Changes (by Flensburger88)
 - optimized the error handling messages
 - its not an error, if no mqtt is configured
 - its not an error, if no windguru uid is configured
+- its not an error, if no windyapp uid is configured
+- its not an error, if no windy uid is configured
+- enable configuration possibility after wifi is connected ( lazy portal )
+- enable configuration for windyApp @runtime
 
 Todos:
-- enable configuration possibility after wifi is connected ( lazy portal )
-- enable windy  / disable in runtime, if no user is configured
 - add custom weather server url
 - add dynamic update url / configurable via setup routine
 - ntp client as project dependency (pio)
 - time as project dependency (pio)
 - docu for mqtt commands
+- flexible send intervall ( via Settings? )
+- remove deprecated spiffs
+
 
 
 An example of building a weather station on the ESP8266 Wemos D1 mini board (cost ~$4), Davis Anemometer ( ~$120) and DHT11 ( ~$1):
