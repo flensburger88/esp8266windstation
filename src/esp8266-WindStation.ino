@@ -64,6 +64,8 @@ volatile int windimpulse = 0;
 #define VERSIONINFO "\n\n----------------- GAYIK Wind Station v1.92 OTA -----------------"
 #define NameAP "WindStationAP"
 
+#define OTA_CHECK_MINUTES 30
+
 // #define FirmwareURL "http://gayikweatherstation.blob.core.windows.net/firmware/esp8266-WindStation.ino.generic.bin" // URL of firmware file for http OTA update by secret MQTT command "flash"
 #define FirmwareURL ""
 #define MQTT_CONNECT_RETRIES 5
@@ -139,35 +141,49 @@ Ticker btn_timer;
 WiFiManager wifiManager;
 
 //--------------------------------START OF CODE SECTION--------------------------------------------------------
-
+unsigned long startTime = 0;
 //-------------------------------------------------------------------------------------------------------------
 ////////////////////////////////////Get wind speed  /////////////////////////////////////////////////////////
 //-------------------------------------------------------------------------------------------------------------
 void getWindSpeed(void)
 {
-  Rotations = 0; // Set Rotations count to 0 ready for calculations
-  // sei(); // Enables interrupts
-
-  delay(3000); // Wait 3 seconds to average wind speed
-  // cli(); // Disable interrupts
-
-  /* convert to mp/h using the formula V=P(2.25/T)
-   V = P(2.25/30) = P * 0.075       V - speed in mph,  P - pulses per sample period, T - sample period in seconds */
-  windSpeed = Rotations * 0.75; // 3 seconds
-  Rotations = 0;                // Reset count for next sample
-
-  if (windSpeed > WindMax)
+  if (startTime == 0)
   {
-    WindMax = windSpeed;
-  }
-  if (WindMin > windSpeed)
-  {
-    WindMin = windSpeed;
+    Rotations = 0; // Set Rotations count to 0 ready for calculations
+    startTime = millis();
   }
 
-  WindAvr = (WindMax + WindMin) * 0.5; // average wind speed mph per 10 minutes
+  long duration = millis() - startTime;
+  if (duration > 3000) // 3 Seconds after the start of the measurement
+  {
+    /* convert to mp/h using the formula V=P(2.25/T)
+     V = P(2.25/3) = P * 0.75       V - speed in mph,  P - pulses per sample period, T - sample period in seconds
+     V = P(2.25/(duration/1000))  -> V = P * (2,25 * 1000) / duration -> P * 2250 / duration
+      */
+    // windSpeed = Rotations * 0.75; // 3 seconds
+    windSpeed = Rotations * 2250 / duration; // duration millis
+    Rotations = 0;                           // Reset count for next sample
 
-  meterWind = 1;
+    if (windSpeed > WindMax)
+    {
+      WindMax = windSpeed;
+    }
+    if (WindMin > windSpeed)
+    {
+      WindMin = windSpeed;
+    }
+
+    WindAvr = (WindMax + WindMin) * 0.5; // average wind speed mph per 10 minutes
+
+    meterWind = 1;
+
+    Rotations = 0; // Set Rotations count to 0 ready for calculations
+    startTime = millis();
+    Serial.print("found wind (mp/h): ");
+    Serial.print(windSpeed);
+    Serial.print("\tendured (ms): ");
+    Serial.println(duration);
+  }
 }
 
 // This is the function that the interrupt calls to increment the rotation count
@@ -240,7 +256,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
   else if (payload_string == "flash")
   {
-    flashOTA();
+    flashOTA(true);
   }
   else
   {
@@ -334,8 +350,21 @@ void saveConfigCallback()
   ESP.restart();
 }
 
-void flashOTA()
+unsigned long nextOTUpdate = 0;
+
+void flashOTA(bool force)
 {
+  if (nextOTUpdate == 0)
+  {
+    nextOTUpdate = millis() + (OTA_CHECK_MINUTES * 1000);
+  }
+
+  if (!force && millis() < nextOTUpdate)
+  {
+    return;
+  }
+  nextOTUpdate = 0;
+
   // disabling the ota update
   if (String(FirmwareURL).length() == 0)
   {
@@ -576,17 +605,11 @@ void setup()
   attachInterrupt(WINDPIN, isr_rotation, FALLING);
 }
 
-int updateOTACheckTimer = 20;
 void loop()
 {
   wifiManager.process();
-  updateOTACheckTimer++;
-  if (updateOTACheckTimer > 30)
-  {
-    updateOTACheckTimer = 0;
-    flashOTA();
-  }
 
+  flashOTA(false);
   mqttClient.loop();
   timedTasks();
   checkStatus();
@@ -594,6 +617,7 @@ void loop()
   {
     getSensors();
   }
+  delay(50);
 }
 
 void blinkLED(int pin, int duration, int n)
