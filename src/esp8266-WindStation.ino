@@ -13,14 +13,38 @@
 #include <ArduinoJson.h> //https://github.com/bblanchon/ArduinoJson
 #include "TimeLib.h"
 
-char mqtt_server[60];
-char mqtt_port[6];
-char mqtt_user[40];
-char mqtt_pass[40];
-char kc_wind[4] = "0";
-char windguru_uid[30];
-char windguru_pass[20];
-char windy_key[128];
+#define LEN_MQTTSERVER 60
+#define LEN_MQTTPORT 6
+#define LEN_MQTTUSER 40
+#define LEN_MQTTPASS 40
+#define LEN_KCWIND 4
+#define LEN_WINDUGUUID 30
+#define LEN_WINDGUTUPASS 20
+#define LEN_WINDYKEY 128
+#define LEN_VANEOFFSET 4
+#define LEN_VANEMAXADC 5
+
+char mqtt_server[LEN_MQTTSERVER];
+char mqtt_port[LEN_MQTTPORT] = "1883";
+char mqtt_user[LEN_MQTTUSER];
+char mqtt_pass[LEN_MQTTPASS];
+char kc_wind[LEN_KCWIND] = "0";
+char windguru_uid[LEN_WINDUGUUID];
+char windguru_pass[LEN_WINDGUTUPASS];
+char windy_key[LEN_WINDYKEY];
+char vaneOffset[LEN_VANEOFFSET] = "0";
+char vaneMaxADC[LEN_VANEMAXADC] = "1023"; // ADC range for input voltage 0..1V
+
+WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, LEN_MQTTSERVER);
+WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, LEN_MQTTPORT);
+WiFiManagerParameter custom_mqtt_user("user", "mqtt user", mqtt_user, LEN_MQTTUSER);
+WiFiManagerParameter custom_mqtt_pass("pass", "mqtt password", mqtt_pass, LEN_MQTTPASS);
+WiFiManagerParameter custom_kc_wind("kc_wind", "wind correction 1-999%", kc_wind, LEN_KCWIND);
+WiFiManagerParameter custom_windguru_uid("windguru_uid", "windguru station UID", windguru_uid, LEN_WINDUGUUID);
+WiFiManagerParameter custom_windguru_pass("windguru_pass", "windguru pass", windguru_pass, LEN_WINDGUTUPASS);
+WiFiManagerParameter custom_windy_key("windy_key", "windy api key", windy_key, LEN_WINDYKEY);
+WiFiManagerParameter custom_vaneMaxADC("vaneMaxADC", "Max ADC value 1-1024", vaneMaxADC, LEN_VANEMAXADC);
+WiFiManagerParameter custom_vaneOffset("vaneOffset", "Wind vane offset 0-359", vaneOffset, LEN_VANEOFFSET);
 
 String st;
 String content;
@@ -36,6 +60,7 @@ volatile int windimpulse = 0;
 #define PasswordAP "87654321"
 // #define FirmwareURL "http://gayikweatherstation.blob.core.windows.net/firmware/esp8266-WindStation.ino.generic.bin" // URL of firmware file for http OTA update by secret MQTT command "flash"
 #define FirmwareURL ""
+#define MQTT_CONNECT_RETRIES 5
 
 #define USE_Windguru
 
@@ -85,7 +110,6 @@ bool firstRun = true;
 
 int errors_count = 0;
 int kUpdFreq = 1; // minutes
-int kRetries = 10;
 int meterWind = 1;
 
 const float kKnots = 1.94;    // m/s to knots conversion
@@ -107,8 +131,6 @@ volatile unsigned long ContactBounceTime; // Timer to avoid contact bounce in in
 int vane_value;                           // raw analog value from wind vane
 int Direction;                            // translated 0 - 360 direction
 int CalDirection;                         // converted value with offset applied
-char vaneOffset[4] = "0";
-char vaneMaxADC[5] = "1023"; // ADC range for input voltage 0..1V
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
@@ -129,6 +151,7 @@ void getWindSpeed(void)
 {
   Rotations = 0; // Set Rotations count to 0 ready for calculations
   // sei(); // Enables interrupts
+
   delay(3000); // Wait 3 seconds to average wind speed
   // cli(); // Disable interrupts
 
@@ -266,20 +289,49 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
 }
 
-// flag for saving data
-bool shouldSaveConfig = false;
-
 // callback notifying us of the need to save config
 void saveConfigCallback()
 {
   Serial.println("Should save config");
-  shouldSaveConfig = true;
-}
 
-void SaveParamsCallback()
-{
-  Serial.println("Should save params");
-  shouldSaveConfig = true;
+  // read updated parameters
+  strcpy(mqtt_server, custom_mqtt_server.getValue());
+  strcpy(mqtt_port, custom_mqtt_port.getValue());
+  strcpy(mqtt_user, custom_mqtt_user.getValue());
+  strcpy(mqtt_pass, custom_mqtt_pass.getValue());
+  strcpy(kc_wind, custom_kc_wind.getValue());
+  strcpy(windguru_uid, custom_windguru_uid.getValue());
+  strcpy(windguru_pass, custom_windguru_pass.getValue());
+  strcpy(windy_key, custom_windy_key.getValue());
+  strcpy(vaneMaxADC, custom_vaneMaxADC.getValue());
+  strcpy(vaneOffset, custom_vaneOffset.getValue());
+
+  // save the custom parameters to FS
+
+  Serial.println("saving config");
+  DynamicJsonDocument json(1024);
+  json["mqtt_server"] = mqtt_server;
+  json["mqtt_port"] = mqtt_port;
+  json["mqtt_user"] = mqtt_user;
+  json["mqtt_pass"] = mqtt_pass;
+  json["kc_wind"] = kc_wind;
+  json["windguru_uid"] = windguru_uid;
+  json["windguru_pass"] = windguru_pass;
+  json["windy_key"] = windy_key;
+  json["vaneMaxADC"] = vaneMaxADC;
+  json["vaneOffset"] = vaneOffset;
+
+  File configFile = SPIFFS.open("/config.json", "w");
+  if (!configFile)
+  {
+    Serial.println("failed to open config file for writing");
+  }
+
+  serializeJson(json, Serial);
+  serializeJson(json, configFile);
+  configFile.close();
+  // end save parameters
+  ESP.restart();
 }
 
 void flashOTA()
@@ -304,7 +356,7 @@ void flashOTA()
   {
   case HTTP_UPDATE_FAILED:
     Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
-    ESP.reset();
+    ESP.restart();
     break;
   case HTTP_UPDATE_NO_UPDATES:
     Serial.println("HTTP_UPDATE_NO_UPDATES");
@@ -343,17 +395,28 @@ void setupSpiffs()
         {
           serializeJson(json, Serial);
           Serial.println("\nparsed json");
-          strcpy(mqtt_server, json["mqtt_server"] | "");
-          strcpy(mqtt_port, json["mqtt_port"] | "");
-          strcpy(mqtt_user, json["mqtt_user"] | "");
-          strcpy(mqtt_pass, json["mqtt_pass"] | "");
-          strcpy(kc_wind, json["kc_wind"] | "");
-          strcpy(windguru_uid, json["windguru_uid"] | "");
-          strcpy(windguru_pass, json["windguru_pass"] | "");
-          strcpy(windy_key, json["windy_key"] | "");
-          strcpy(vaneMaxADC, json["vaneMaxADC"] | "");
-          strcpy(vaneOffset, json["vaneOffset"] | "");
+          strcpy(mqtt_server, json["mqtt_server"] | mqtt_server);
+          strcpy(mqtt_port, json["mqtt_port"] | mqtt_port);
+          strcpy(mqtt_user, json["mqtt_user"] | mqtt_user);
+          strcpy(mqtt_pass, json["mqtt_pass"] | mqtt_pass);
+          strcpy(kc_wind, json["kc_wind"] | kc_wind);
+          strcpy(windguru_uid, json["windguru_uid"] | windguru_uid);
+          strcpy(windguru_pass, json["windguru_pass"] | windguru_pass);
+          strcpy(windy_key, json["windy_key"] | windy_key);
+          strcpy(vaneMaxADC, json["vaneMaxADC"] | vaneMaxADC);
+          strcpy(vaneOffset, json["vaneOffset"] | vaneOffset);
           Serial.println("\nAfter Reading");
+
+          custom_mqtt_server.setValue(mqtt_server, LEN_MQTTSERVER);
+          custom_mqtt_port.setValue(mqtt_port, LEN_MQTTPORT);
+          custom_mqtt_user.setValue(mqtt_user, LEN_MQTTUSER);
+          custom_mqtt_pass.setValue(mqtt_pass, LEN_MQTTPASS);
+          custom_kc_wind.setValue(kc_wind, LEN_KCWIND);
+          custom_windguru_uid.setValue(windguru_uid, LEN_WINDUGUUID);
+          custom_windguru_pass.setValue(windguru_pass, LEN_WINDGUTUPASS);
+          custom_windy_key.setValue(windy_key, LEN_WINDYKEY);
+          custom_vaneMaxADC.setValue(vaneMaxADC, LEN_VANEMAXADC);
+          custom_vaneOffset.setValue(vaneOffset, LEN_VANEOFFSET);
         }
       }
     }
@@ -373,6 +436,7 @@ void connectMQTT()
   }
   else
   {
+    short kRetries = MQTT_CONNECT_RETRIES;
     Serial.print("Connecting to ");
     Serial.print(mqtt_server);
     Serial.print(" Broker . .");
@@ -426,16 +490,6 @@ void setup()
   // The extra parameters to be configured (can be either global or just in the setup)
   // After connecting, parameter.getValue() will get you the configured value
   // id/name placeholder/prompt default length
-  WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 60);
-  WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, 6);
-  WiFiManagerParameter custom_mqtt_user("user", "mqtt user", mqtt_user, 40);
-  WiFiManagerParameter custom_mqtt_pass("pass", "mqtt password", mqtt_pass, 40);
-  WiFiManagerParameter custom_kc_wind("kc_wind", "wind correction 1-999%", kc_wind, 4);
-  WiFiManagerParameter custom_windguru_uid("windguru_uid", "windguru station UID", windguru_uid, 30);
-  WiFiManagerParameter custom_windguru_pass("windguru_pass", "windguru pass", windguru_pass, 20);
-  WiFiManagerParameter custom_windy_key("windy_key", "windy api key", windy_key, 128);
-  WiFiManagerParameter custom_vaneMaxADC("vaneMaxADC", "Max ADC value 1-1024", vaneMaxADC, 5);
-  WiFiManagerParameter custom_vaneOffset("vaneOffset", "Wind vane offset 0-359", vaneOffset, 4);
 
 #ifdef MOSFETPIN
   pinMode(MOSFETPIN, OUTPUT);
@@ -454,8 +508,6 @@ void setup()
 
   wifiManager.setSaveConfigCallback(saveConfigCallback); // set config save notify callback
 
-  // std::vector<const char *> menu = {"wifi","info","param","update","close","sep","erase","restart","exit"};
-  // wifiManager.setMenu(menu); // custom menu, pass vector
 
 #ifdef DeepSleepMODE
   wifiManager.setTimeout(60); // sets timeout until configuration portal gets turned off
@@ -484,61 +536,18 @@ void setup()
 #if defined(DeepSleepMODE) || defined(NightSleepMODE)
     ESP.deepSleep(SLEEPNIGHT * 60000000); // Sleep for x* minute(s)
 #else
-    ESP.reset();
+    ESP.restart();
 #endif
     delay(5000);
   }
 
-  // read updated parameters
-  strcpy(mqtt_server, custom_mqtt_server.getValue());
-  strcpy(mqtt_port, custom_mqtt_port.getValue());
-  strcpy(mqtt_user, custom_mqtt_user.getValue());
-  strcpy(mqtt_pass, custom_mqtt_pass.getValue());
-  strcpy(kc_wind, custom_kc_wind.getValue());
-  strcpy(windguru_uid, custom_windguru_uid.getValue());
-  strcpy(windguru_pass, custom_windguru_pass.getValue());
-  strcpy(windy_key, custom_windy_key.getValue());
-  strcpy(vaneMaxADC, custom_vaneMaxADC.getValue());
-  strcpy(vaneOffset, custom_vaneOffset.getValue());
-
-  // save the custom parameters to FS
-  if (shouldSaveConfig)
-  {
-    Serial.println("saving config");
-    DynamicJsonDocument json(1024);
-    json["mqtt_server"] = mqtt_server;
-    json["mqtt_port"] = mqtt_port;
-    json["mqtt_user"] = mqtt_user;
-    json["mqtt_pass"] = mqtt_pass;
-    json["kc_wind"] = kc_wind;
-    json["windguru_uid"] = windguru_uid;
-    json["windguru_pass"] = windguru_pass;
-    json["windy_key"] = windy_key;
-    json["vaneMaxADC"] = vaneMaxADC;
-    json["vaneOffset"] = vaneOffset;
-
-    File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile)
-    {
-      Serial.println("failed to open config file for writing");
-    }
-
-    serializeJson(json, Serial);
-    serializeJson(json, configFile);
-    configFile.close();
-
-    // TODO: Start Webserver to modify parameters in runtime
-    // openRestServer();
-
-    // end save parameters
-  }
-
   Serial.print("\nConnecting to WiFi");
-  while ((WiFi.status() != WL_CONNECTED) && kRetries--)
+  if ((WiFi.status() != WL_CONNECTED))
   {
-    delay(500);
-    Serial.print(" .");
+    Serial.println(" Not Connected to Wifi - Restarting");
+    ESP.restart();
   }
+
   if (WiFi.status() == WL_CONNECTED)
   {
 #if defined(DeepSleepMODE) || defined(NightSleepMODE)
@@ -552,18 +561,20 @@ void setup()
     Serial.println(WiFi.macAddress());
     connectMQTT();
   }
-  else
-  {
-    Serial.println(" WiFi FAILED!");
-    Serial.println("\n----------------------------------------------------------------");
-    Serial.println();
-  }
+
+  // TODO: Start Webserver to modify parameters in runtime
+  // wifiManager.setConfigPortalBlocking(false);  
+  wifiManager.stopConfigPortal();
+  wifiManager.startWebPortal();
+  // wifiManager.startConfigPortal();
+
   attachInterrupt(WINDPIN, isr_rotation, FALLING);
 }
 
 int updateOTACheckTimer = 20;
 void loop()
 {
+  wifiManager.process();
   updateOTACheckTimer++;
   if (updateOTACheckTimer > 30)
   {
