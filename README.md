@@ -25,6 +25,8 @@ Additional Changes (by Flensburger88)
 - enable configuration for windyApp @runtime
 
 Todos:
+- better reading logik for wind values / non blocking for Webserver
+- check field length for windyApp
 - add custom weather server url
 - add dynamic update url / configurable via setup routine
 - ntp client as project dependency (pio)
