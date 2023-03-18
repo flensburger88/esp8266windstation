@@ -508,7 +508,6 @@ void setup()
 
   wifiManager.setSaveConfigCallback(saveConfigCallback); // set config save notify callback
 
-
 #ifdef DeepSleepMODE
   wifiManager.setTimeout(60); // sets timeout until configuration portal gets turned off
 #else
@@ -527,6 +526,9 @@ void setup()
   wifiManager.addParameter(&custom_vaneMaxADC);
   wifiManager.addParameter(&custom_vaneOffset);
 
+  WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);
+
   if (!wifiManager.autoConnect(NameAP))
   {
     Serial.println("failed to connect and hit timeout");
@@ -535,17 +537,16 @@ void setup()
 
 #if defined(DeepSleepMODE) || defined(NightSleepMODE)
     ESP.deepSleep(SLEEPNIGHT * 60000000); // Sleep for x* minute(s)
-#else
-    ESP.restart();
 #endif
-    delay(5000);
   }
 
-  Serial.print("\nConnecting to WiFi");
+  Serial.print("\nChecking Wifi Connection");
   if ((WiFi.status() != WL_CONNECTED))
   {
     Serial.println(" Not Connected to Wifi - Restarting");
     ESP.restart();
+    delay(5000);
+    return;
   }
 
   if (WiFi.status() == WL_CONNECTED)
@@ -563,10 +564,8 @@ void setup()
   }
 
   // TODO: Start Webserver to modify parameters in runtime
-  // wifiManager.setConfigPortalBlocking(false);  
   wifiManager.stopConfigPortal();
   wifiManager.startWebPortal();
-  // wifiManager.startConfigPortal();
 
   attachInterrupt(WINDPIN, isr_rotation, FALLING);
 }
