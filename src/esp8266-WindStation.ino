@@ -1,6 +1,6 @@
 #include <FS.h> //this needs to be first, or it all crashes and burns...
 
-#include "DHT.h" //https://github.com/adafruit/DHT-sensor-library
+#include <DHT.h> //https://github.com/adafruit/DHT-sensor-library
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <Ticker.h>
@@ -8,10 +8,10 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ESP8266httpUpdate.h>
-#include "WiFiManager.h" //https://github.com/tzapu/WiFiManager
+#include <WiFiManager.h> //https://github.com/tzapu/WiFiManager
 #include <DNSServer.h>
 #include <ArduinoJson.h> //https://github.com/bblanchon/ArduinoJson
-#include "TimeLib.h"
+#include <TimeLib.h>
 
 #define LEN_MQTTSERVER 60
 #define LEN_MQTTPORT 6
@@ -82,10 +82,10 @@ volatile int windimpulse = 0;
 
 // #define MOSFETPIN       15                                   // Experemental!!! GPIO15 (D8 for NodeMcu). MosFET's gate pin for power supply sensors, off for current drain minimize. Not connect this GPIO directly to sensors you burning it! The maximum source current of GPIO is about 12mA
 
-#define BUTTON 4  // optional, GPIO4 for Witty Cloud. GPIO0/D3 for NodeMcu (Flash) - not work with deepsleep, set 4!
-#define LED 2     // GPIO2 for Witty Cloud. GPIO16/D0 for NodeMcu - not work with deepsleep, set 2!
-#define DHTPIN 14 // GPIO14 (D5 for NodeMcu)
-#define WINDPIN 5 // GPIO5 (D1 for NodeMcu)
+#define BUTTON 4   // optional, GPIO4 for Witty Cloud. GPIO0/D3 for NodeMcu (Flash) - not work with deepsleep, set 4!
+#define LED 2      // GPIO2 for Witty Cloud. GPIO16/D0 for NodeMcu - not work with deepsleep, set 2!
+#define DHTPIN D5  // GPIO14 (D5 for NodeMcu)
+#define WINDPIN D1 // GPIO5 (D1 for NodeMcu)
 
 #define MQTT_TOPIC "windpoint" // mqtt topic (Must be unique for each device)
 #define MQTT_TOPICm "windpoint/m"
@@ -96,11 +96,6 @@ volatile int windimpulse = 0;
 DHT dht(DHTPIN, DHTTYPE); //
 #endif
 
-extern "C"
-{
-#include "user_interface.h"
-}
-
 bool sendStatus = true;
 bool sensorReport = false;
 bool resetWind = true;
@@ -108,10 +103,10 @@ bool firstRun = true;
 
 int errors_count = 0;
 int kUpdFreq = 1; // minutes
-int meterWind = 1;
+bool firstWindReceived = 0;
 
-const float kKnots = 1.94;    // m/s to knots conversion
-const int windPeriodSec = 10; // wind measurement period in seconds 1-10sec
+const float kKnots = 1.94;     // m/s to knots conversion
+#define windMeasurePeriodSec 3 // wind measurement period in seconds 1-10sec / 3!
 
 float dhtH, dhtT, windMS = 0;
 float WindMax = 0, WindAvr = 0, WindMin = 100;
@@ -154,7 +149,7 @@ void getWindSpeed(void)
   }
 
   long duration = millis() - startTime;
-  if (duration > 3000) // 3 Seconds after the start of the measurement
+  if (duration > (windMeasurePeriodSec * 1000)) // 3 Seconds after the start of the measurement
   {
     /* convert to mp/h using the formula V=P(2.25/T)
      V = P(2.25/3) = P * 0.75       V - speed in mph,  P - pulses per sample period, T - sample period in seconds
@@ -175,7 +170,7 @@ void getWindSpeed(void)
 
     WindAvr = (WindMax + WindMin) * 0.5; // average wind speed mph per 10 minutes
 
-    meterWind = 1;
+    firstWindReceived = true;
 
     Rotations = 0; // Set Rotations count to 0 ready for calculations
     startTime = millis();
@@ -728,9 +723,9 @@ void getSensors()
     mqttClient.publish("debug", "ADC:" + String(a0) + " " + NTP.getTimeDateString());
 #endif
 
-  if (meterWind > 0)
+  if (firstWindReceived)
   { // already made measurement wind power
-    pubString = "{\"Min\": " + String(WindMin, 2) + ", " + "\"Avr\": " + String(WindAvr / meterWind, 2) + ", " + "\"Max\": " + String(WindMax, 2) + ", " + "\"Dir\": " + String(CalDirection) + "}";
+    pubString = "{\"Min\": " + String(WindMin, 2) + ", " + "\"Avr\": " + String(WindAvr) + ", " + "\"Max\": " + String(WindMax, 2) + ", " + "\"Dir\": " + String(CalDirection) + "}";
     pubString.toCharArray(msg_buff, pubString.length() + 1);
     if (mqttClient.connected())
       mqttClient.publish("wind", msg_buff);
@@ -809,8 +804,8 @@ bool SendToWindguru()
     md5.begin();
     md5.add(String(time) + String(windguru_uid) + String(windguru_pass));
     md5.calculate();
-    if (meterWind > 0)
-      getData = "uid=" + String(windguru_uid) + "&salt=" + String(time) + "&hash=" + md5.toString() + "&interval=" + String(meterWind * windPeriodSec) + "&wind_min=" + String(getKnots(WindMin), 2) + "&wind_avg=" + String(getKnots(WindAvr), 2) + "&wind_max=" + String(getKnots(WindMax), 2);
+    if (firstWindReceived)
+      getData = "uid=" + String(windguru_uid) + "&salt=" + String(time) + "&hash=" + md5.toString() + "&interval=" + String(kUpdFreq) + "&wind_min=" + String(getKnots(WindMin), 2) + "&wind_avg=" + String(getKnots(WindAvr), 2) + "&wind_max=" + String(getKnots(WindMax), 2);
     // wind_direction     wind direction as degrees (0 = north, 90 east etc...)
     getData = getData + "&wind_direction=" + String(CalDirection);
 #ifdef DHTPIN
@@ -861,8 +856,8 @@ bool SendToWindyCom()
     Link = "http://stations.windy.com/pws/update/" + String(windy_key) + "?name=windsurf&";
 
     // wind speed during interval (knots)
-    if (meterWind > 0)
-      getData = "winddir=" + String(CalDirection) + "&wind=" + String(WindAvr / meterWind, 2) + "&gust=" + String(WindMax, 2);
+    if (firstWindReceived)
+      getData = "winddir=" + String(CalDirection) + "&wind=" + String(WindAvr) + "&gust=" + String(WindMax, 2);
 
 #ifdef DHTPIN
     if (!isnan(dhtT))
@@ -913,8 +908,8 @@ bool SendToWindyApp()
   else
   { // Check WiFi connection status
     Link = "/apiV9.php?method=addCustomMeteostation&secret=" + String(windyAppSecret) + "&i=" + String(windyAppID) + "&";
-    if (meterWind > 0)
-      getData = "d5=" + String(map(CalDirection, 0, 359, 1, 1024)) + "&m=" + String(WindMin * 10, 0) + "&a=" + String(WindAvr / meterWind * 10, 0) + "&g=" + String(WindMax * 10, 0);
+    if (firstWindReceived)
+      getData = "d5=" + String(map(CalDirection, 0, 359, 1, 1024)) + "&m=" + String(WindMin * 10, 0) + "&a=" + String(WindAvr * 10, 0) + "&g=" + String(WindMax * 10, 0);
 
 #ifdef DHTPIN
     if (!isnan(dhtT))
