@@ -28,17 +28,19 @@ Additional Changes (by Flensburger88)
 - better reading logik for wind values / non blocking for Webserver
 
 Todos:
-
+- wind direction not read out correctly
 - check field length for windyApp
-- add custom weather server url
-- add dynamic update url / configurable via setup routine
-- docu for mqtt commands
-- flexible send intervall ( via Settings? )
 - remove deprecated spiffs
 - (!) check windyCom api
 - (!) check windyApp api
 - (!) check windGuru api
 - (?) DHT22 not delivering data - error on read
+
+- add custom weather server url
+- add dynamic update url / configurable via setup routine
+- docu for mqtt commands
+- flexible send intervall ( via Settings? )
+
 
 ## Original Doku
 

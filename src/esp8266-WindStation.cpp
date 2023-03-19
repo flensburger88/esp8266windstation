@@ -12,6 +12,7 @@
 #include <DNSServer.h>
 #include <ArduinoJson.h> //https://github.com/bblanchon/ArduinoJson
 #include <TimeLib.h>
+#include "methods.h"
 
 #define LEN_MQTTSERVER 60
 #define LEN_MQTTPORT 6
@@ -92,7 +93,7 @@ volatile int windimpulse = 0;
 #define MQTT_TOPICo "windpoint/o"
 
 #ifdef DHTPIN
-#define DHTTYPE DHT22     // DHT11, DHT22, DHT21, AM2301
+#define DHTTYPE DHT11     // DHT11, DHT22, DHT21, AM2301
 DHT dht(DHTPIN, DHTTYPE); //
 #endif
 
@@ -222,6 +223,51 @@ float getms(float speed)
   return speed * 0.44704; // metric m/s 0.44704;;
 }
 
+unsigned long nextOTUpdate = 0;
+void flashOTA(bool force)
+{
+  if (nextOTUpdate == 0)
+  {
+    nextOTUpdate = millis() + (OTA_CHECK_MINUTES * 60 * 1000);
+  }
+
+  if (!force && millis() < nextOTUpdate)
+  {
+    return;
+  }
+  nextOTUpdate = 0;
+
+  // disabling the ota update
+  if (String(FirmwareURL).length() == 0)
+  {
+    Serial.println("OTA Update disabled");
+    return;
+  }
+
+  Serial.println("HTTP_UPDATE FILE: " + String(FirmwareURL));
+  // noInterrupts();
+  detachInterrupt(digitalPinToInterrupt(WINDPIN));
+  WiFiClient client;
+
+  ESPhttpUpdate.setLedPin(LED, LOW);
+  t_httpUpdate_return ret = ESPhttpUpdate.update(client, FirmwareURL);
+  attachInterrupt(WINDPIN, isr_rotation, FALLING);
+
+  switch (ret)
+  {
+  case HTTP_UPDATE_FAILED:
+    Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+    ESP.restart();
+    break;
+  case HTTP_UPDATE_NO_UPDATES:
+    Serial.println("HTTP_UPDATE_NO_UPDATES");
+    break;
+  case HTTP_UPDATE_OK:
+    Serial.println("HTTP_UPDATE_OK");
+    break;
+  }
+}
+
 //-------------------------------------------------------------------------------------------------------------
 /////////////////////////////////// MQTT Received message callback ////////////////////////////////////////////
 //-------------------------------------------------------------------------------------------------------------
@@ -343,52 +389,6 @@ void saveConfigCallback()
   configFile.close();
   // end save parameters
   ESP.restart();
-}
-
-unsigned long nextOTUpdate = 0;
-
-void flashOTA(bool force)
-{
-  if (nextOTUpdate == 0)
-  {
-    nextOTUpdate = millis() + (OTA_CHECK_MINUTES * 1000);
-  }
-
-  if (!force && millis() < nextOTUpdate)
-  {
-    return;
-  }
-  nextOTUpdate = 0;
-
-  // disabling the ota update
-  if (String(FirmwareURL).length() == 0)
-  {
-    Serial.println("OTA Update disabled");
-    return;
-  }
-
-  Serial.println("HTTP_UPDATE FILE: " + String(FirmwareURL));
-  // noInterrupts();
-  detachInterrupt(digitalPinToInterrupt(WINDPIN));
-  WiFiClient client;
-
-  ESPhttpUpdate.setLedPin(LED, LOW);
-  t_httpUpdate_return ret = ESPhttpUpdate.update(client, FirmwareURL);
-  attachInterrupt(WINDPIN, isr_rotation, FALLING);
-
-  switch (ret)
-  {
-  case HTTP_UPDATE_FAILED:
-    Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
-    ESP.restart();
-    break;
-  case HTTP_UPDATE_NO_UPDATES:
-    Serial.println("HTTP_UPDATE_NO_UPDATES");
-    break;
-  case HTTP_UPDATE_OK:
-    Serial.println("HTTP_UPDATE_OK");
-    break;
-  }
 }
 
 void setupSpiffs()
